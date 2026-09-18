@@ -30,7 +30,7 @@ function clean(name) {
   return FEATURE_LABELS[name] || name
 }
 
-export default function CascadeResults({ result, ecgResult }) {
+export default function CascadeResults({ result, ecgResult, xrayResult }) {
   const [activeIv, setActiveIv] = useState('all')
   const stage   = STAGE_CONFIG[result.cascade_stage]
   const tl      = result.timeline
@@ -96,7 +96,86 @@ export default function CascadeResults({ result, ecgResult }) {
       <div className="rounded-xl p-4" style={{ background: '#0a1020', border: '1px solid #1e2d4d' }}>
         <div className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: '#64748b' }}>AI Recommended Action</div>
         <div className="text-sm font-medium text-white">{result.recommended_action}</div>
+        {xrayResult && xrayResult.alert_level !== 'normal' && (
+          <div className="mt-2 text-xs p-2 rounded"
+            style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', color: '#fbbf24' }}>
+            🩻 X-Ray co-finding: <strong>{xrayResult.predicted_class}</strong> ({(xrayResult.confidence*100).toFixed(0)}% conf) — {xrayResult.clinical_note}
+          </div>
+        )}
       </div>
+
+      {/* Clinical Insights */}
+      {result.insights && (
+        <div className="rounded-xl p-4 space-y-3 fade-in" style={{ background: '#0f1729', border: '1px solid #1e2d4d' }}>
+          <div className="text-xs font-bold uppercase tracking-widest" style={{ color: '#64748b' }}>Clinical Insights</div>
+
+          {/* Danger flag — cross-modal combination */}
+          {result.insights.danger_flag && (
+            <div className="rounded-lg p-3 flex gap-3 items-start pulse-critical"
+              style={{ background: 'rgba(239,68,68,0.12)', border: '2px solid #ef4444' }}>
+              <span className="text-lg">🚨</span>
+              <div>
+                <div className="text-xs font-black mb-1" style={{ color: '#ef4444' }}>DANGEROUS COMBINATION DETECTED</div>
+                <div className="text-xs" style={{ color: '#fca5a5', lineHeight: 1.6 }}>{result.insights.danger_flag}</div>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+
+            {/* Urgency window */}
+            {result.insights.urgency && (() => {
+              const u = result.insights.urgency
+              const colors = { critical: '#ef4444', high: '#f97316', moderate: '#eab308', normal: '#22c55e' }
+              const c = colors[u.color] || '#64748b'
+              return (
+                <div className="rounded-lg p-3" style={{ background: '#0a1020', border: `1px solid ${c}` }}>
+                  <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#64748b' }}>Intervention Window</div>
+                  <div className="text-lg font-black" style={{ color: c }}>{u.label}</div>
+                  {u.days > 0 && <div className="text-xs mt-1" style={{ color: '#475569' }}>Optimal window: next {u.days} days</div>}
+                  {u.days === 0 && <div className="text-xs mt-1" style={{ color: '#ef4444' }}>Act now — window closing</div>}
+                </div>
+              )
+            })()}
+
+            {/* CHA₂DS₂-VASc */}
+            {result.insights.chadsvasc ? (
+              <div className="rounded-lg p-3" style={{ background: '#0a1020', border: '1px solid #3b82f6' }}>
+                <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#64748b' }}>CHA₂DS₂-VASc Score</div>
+                <div className="flex items-end gap-2">
+                  <div className="text-2xl font-black" style={{ color: '#3b82f6' }}>{result.insights.chadsvasc.score}</div>
+                  <div className="text-xs mb-1" style={{ color: '#475569' }}>/ 9</div>
+                </div>
+                <div className="text-xs font-semibold" style={{ color: '#f97316' }}>{result.insights.chadsvasc.annual_risk}% annual stroke risk</div>
+                <div className="text-xs mt-1" style={{ color: '#94a3b8' }}>{result.insights.chadsvasc.recommendation}</div>
+              </div>
+            ) : (
+              <div className="rounded-lg p-3" style={{ background: '#0a1020', border: '1px solid #1e2d4d' }}>
+                <div className="text-xs font-bold uppercase tracking-wider mb-1" style={{ color: '#64748b' }}>CHA₂DS₂-VASc Score</div>
+                <div className="text-xs mt-2" style={{ color: '#334155' }}>Applicable for AFib / AFL patients only</div>
+              </div>
+            )}
+
+            {/* Drug warnings */}
+            {result.insights.drug_warnings?.length > 0 && (
+              <div className="rounded-lg p-3" style={{ background: '#0a1020', border: '1px solid #1e2d4d' }}>
+                <div className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#64748b' }}>Drug Contraindications</div>
+                <div className="space-y-2">
+                  {result.insights.drug_warnings.map((w, i) => {
+                    const c = w.severity === 'high' ? '#ef4444' : w.severity === 'moderate' ? '#f97316' : '#22c55e'
+                    return (
+                      <div key={i} className="text-xs rounded p-2" style={{ background: `${c}11`, border: `1px solid ${c}44`, color: '#cbd5e1', lineHeight: 1.5 }}>
+                        <span style={{ color: c, fontWeight: 700 }}>{w.severity === 'high' ? '⛔' : w.severity === 'moderate' ? '⚠️' : '✓'} </span>
+                        {w.text}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Main results grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

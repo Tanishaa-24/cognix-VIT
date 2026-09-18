@@ -9,6 +9,7 @@ export default defineConfig({
     proxy: {
       '/ecg':     'http://localhost:8000',
       '/cascade': 'http://localhost:8000',
+      '/xray':    'http://localhost:8000',
       '/health':  'http://localhost:8000',
     }
   }

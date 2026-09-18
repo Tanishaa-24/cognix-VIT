@@ -115,6 +115,141 @@ def get_shap_explanation(cascade_model, clinical: dict,
     return items[:top_n]
 
 
+def compute_chadsvasc(clinical: dict, arrhythmia_name: str) -> dict | None:
+    """
+    CHA₂DS₂-VASc stroke risk score — only meaningful for AFib/AFL patients.
+    Returns score, annual stroke risk %, and recommendation.
+    """
+    if arrhythmia_name not in {"AFIB", "AFL"}:
+        return None
+
+    score = 0
+    if clinical.get("heart_disease"):          score += 1   # C — cardiac disease
+    if clinical.get("hypertension"):           score += 1   # H — hypertension
+    age = clinical.get("age", 0)
+    if age >= 75:                              score += 2   # A2 — age ≥75
+    elif age >= 65:                            score += 1   # A — age 65-74
+    if clinical.get("avg_glucose_level", 0) > 126: score += 1  # D — diabetes (glucose proxy)
+    if clinical.get("gender") == 0:            score += 1   # Sc — female sex
+
+    # Annual stroke risk by score (ESC 2020 guidelines)
+    ANNUAL_RISK = {0: 0.0, 1: 1.3, 2: 2.2, 3: 3.2, 4: 4.0, 5: 6.7, 6: 9.8, 7: 9.6, 8: 12.5, 9: 15.2}
+    annual_risk = ANNUAL_RISK.get(min(score, 9), 15.2)
+
+    if score == 0:
+        rec = "No anticoagulation needed."
+    elif score == 1 and clinical.get("gender") == 1:
+        rec = "Consider anticoagulation. Low-moderate risk."
+    else:
+        rec = "Anticoagulation recommended (OAC). High stroke risk."
+
+    return {
+        "score":        score,
+        "max_score":    9,
+        "annual_risk":  annual_risk,
+        "recommendation": rec,
+    }
+
+
+# Dangerous cross-modal combinations (arrhythmia + xray finding)
+_DANGER_COMBOS = {
+    ("VT",   "Bacterial Pneumonia"): "VT + Bacterial Pneumonia: Sepsis-induced ventricular arrhythmia pattern. ICU monitoring required. Blood cultures + IV antibiotics stat.",
+    ("VFL",  "Bacterial Pneumonia"): "VFL + Bacterial Pneumonia: Critical — septic shock may precipitate VFib. Immediate ICU escalation.",
+    ("SDHB", "Bacterial Pneumonia"): "Sudden cardiac death risk + active pneumonia: Extreme escalation. Defibrillator on standby.",
+    ("IVR",  "Bacterial Pneumonia"): "IVR + Bacterial Pneumonia: Post-resuscitation or sepsis pattern. Cardiology + ICU co-management.",
+    ("AFIB", "Bacterial Pneumonia"): "AFib + Bacterial Pneumonia: Sepsis-related AF. Blood cultures, IV antibiotics, rate control. Cardiology consult within 2 hours.",
+    ("AFIB", "Viral Pneumonia"):     "AFib + Viral Pneumonia: Viral myocarditis pattern. Echo required. Avoid NSAIDs. Cardiology + Pulmonology co-management.",
+    ("AFL",  "Bacterial Pneumonia"): "AFL + Bacterial Pneumonia: Pneumonia-triggered flutter. Treat infection first; cardioversion after stabilisation.",
+    ("VT",   "Viral Pneumonia"):     "VT + Viral Pneumonia: Possible viral myocarditis. Urgent cardiac MRI and troponin levels.",
+    ("WPW",  "Bacterial Pneumonia"): "WPW + Pneumonia: Infection may trigger accessory pathway tachycardia. Avoid AV-nodal blocking agents.",
+}
+
+
+def get_clinical_insights(clinical: dict, arrhythmia_name: str,
+                           cascade_stage: int, combined_risk: float,
+                           xray_class: str | None = None) -> dict:
+    """
+    Generates patient-specific clinical insights:
+      - Drug contraindication warnings
+      - CHA₂DS₂-VASc score (AFib only)
+      - Dangerous cross-modal combination flags
+      - Intervention urgency window
+    """
+    warnings = []
+
+    # ── Drug contraindication warnings ───────────────────────────────────────
+    is_stroke_arrhythmia  = arrhythmia_name in STROKE_ELEVATING
+    is_cardiac_arrhythmia = arrhythmia_name in CARDIAC_ELEVATING
+
+    if is_stroke_arrhythmia:
+        if clinical.get("avg_glucose_level", 0) > 200:
+            warnings.append({
+                "type": "drug",
+                "severity": "high",
+                "text": f"Anticoagulation indicated BUT glucose {clinical['avg_glucose_level']:.0f} mg/dL → elevated bleeding risk. Tight glycaemic control before initiating OAC."
+            })
+        if clinical.get("age", 0) > 75:
+            warnings.append({
+                "type": "drug",
+                "severity": "moderate",
+                "text": "Age >75 + anticoagulation → reduce DOAC dose (e.g. Apixaban 2.5mg BD). Renal function check required."
+            })
+        if clinical.get("hypertension") and clinical.get("avg_glucose_level", 0) > 140:
+            warnings.append({
+                "type": "drug",
+                "severity": "moderate",
+                "text": "Hypertension + elevated glucose → ensure BP <140/90 before OAC initiation to minimise haemorrhagic stroke risk."
+            })
+
+    if is_cardiac_arrhythmia:
+        if clinical.get("bmi", 0) > 35:
+            warnings.append({
+                "type": "drug",
+                "severity": "moderate",
+                "text": f"BMI {clinical['bmi']:.1f} → beta-blocker weight-based dosing required. Consider cardioselective agent (Bisoprolol/Metoprolol)."
+            })
+        if clinical.get("avg_glucose_level", 0) > 180:
+            warnings.append({
+                "type": "drug",
+                "severity": "moderate",
+                "text": "Hyperglycaemia masks hypoglycaemia symptoms when on beta-blockers. Glucose monitoring frequency must increase."
+            })
+
+    if not warnings:
+        warnings.append({
+            "type": "drug",
+            "severity": "low",
+            "text": "No major drug contraindications detected for recommended interventions based on current profile."
+        })
+
+    # ── CHA₂DS₂-VASc ─────────────────────────────────────────────────────────
+    chadsvasc = compute_chadsvasc(clinical, arrhythmia_name)
+
+    # ── Dangerous cross-modal combination ────────────────────────────────────
+    danger_flag = None
+    if xray_class and xray_class != "Normal":
+        key = (arrhythmia_name, xray_class)
+        if key in _DANGER_COMBOS:
+            danger_flag = _DANGER_COMBOS[key]
+
+    # ── Intervention urgency window ───────────────────────────────────────────
+    if cascade_stage == 4 or combined_risk > 65:
+        urgency = {"days": 0,  "label": "Immediate",   "color": "critical"}
+    elif cascade_stage == 3 or combined_risk > 40:
+        urgency = {"days": 7,  "label": "Within 1 week", "color": "high"}
+    elif cascade_stage == 2 or combined_risk > 20:
+        urgency = {"days": 30, "label": "Within 1 month", "color": "moderate"}
+    else:
+        urgency = {"days": 90, "label": "Within 3 months", "color": "normal"}
+
+    return {
+        "drug_warnings":  warnings,
+        "chadsvasc":      chadsvasc,
+        "danger_flag":    danger_flag,
+        "urgency":        urgency,
+    }
+
+
 def simulate_counterfactual(cascade_model, clinical: dict,
                             arrhythmia_name: str, confidence: float,
                             intervention: str) -> dict:

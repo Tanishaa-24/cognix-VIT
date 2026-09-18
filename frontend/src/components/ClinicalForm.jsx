@@ -20,7 +20,7 @@ const FIELD_META = {
   Residence_type:    { label: 'Residence',              type: 'select', opts: [['0','Rural'],['1','Urban']] },
 }
 
-export default function ClinicalForm({ ecgResult, onResult, loading, setLoading }) {
+export default function ClinicalForm({ ecgResult, xrayResult, onResult, loading, setLoading }) {
   const [fields, setFields] = useState(DEFAULTS)
   const [error, setError]   = useState(null)
 
@@ -35,6 +35,7 @@ export default function ClinicalForm({ ecgResult, onResult, loading, setLoading 
         ...fields,
         arrhythmia_name:       ecgResult?.predicted_class  || 'NSR',
         arrhythmia_confidence: ecgResult?.confidence       || 1.0,
+        xray_class:            xrayResult?.predicted_class || 'Normal',
       }
       const { data } = await axios.post('/cascade/predict', payload)
       // Fetch all counterfactuals in parallel
@@ -48,7 +49,7 @@ export default function ClinicalForm({ ecgResult, onResult, loading, setLoading 
   }
 
   return (
-    <div style={{ background: '#0f1729', border: '1px solid #1e2d4d', borderRadius: 12, padding: 20 }}>
+    <div style={{ background: '#0f1729', border: '1px solid #1e2d4d', borderRadius: 12, padding: 20, height: '100%' }}>
       <div className="mb-4">
         <div className="text-xs font-bold uppercase tracking-widest mb-1" style={{ color: '#8b5cf6' }}>MODULE 02</div>
         <h2 className="text-white font-bold text-lg">Patient Clinical Profile</h2>

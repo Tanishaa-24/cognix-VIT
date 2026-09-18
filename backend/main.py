@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 BASE_DIR    = os.path.dirname(__file__)
 MODELS_DIR  = os.path.join(BASE_DIR, "saved_models")
 ECG_MODEL   = os.path.join(MODELS_DIR, "ecg_model.pth")
+XRAY_MODEL  = os.path.join(MODELS_DIR, "xray_model.pth")
 
 # Force CPU: MPS + SHAP TreeExplainer conflict causes SIGSEGV when both load in same process
 DEVICE = "cpu"
@@ -16,6 +17,7 @@ DEVICE = "cpu"
 sys.path.insert(0, BASE_DIR)
 from api.ecg     import router as ecg_router,     load_ecg_model
 from api.cascade import router as cascade_router, load_cascade_models
+from api.xray    import router as xray_router,    load_xray_model
 
 
 @asynccontextmanager
@@ -23,6 +25,10 @@ async def lifespan(app: FastAPI):
     print(f"[CascadeIQ] Loading models on {DEVICE}...")
     load_ecg_model(ECG_MODEL, DEVICE)
     load_cascade_models(MODELS_DIR)
+    if os.path.exists(XRAY_MODEL):
+        load_xray_model(XRAY_MODEL, DEVICE)
+    else:
+        print("[XRay] Model not found — run backend/ml/train_xray.py first")
     print("[CascadeIQ] All models ready ✓")
     yield
     print("[CascadeIQ] Shutting down.")
@@ -45,6 +51,7 @@ app.add_middleware(
 
 app.include_router(ecg_router)
 app.include_router(cascade_router)
+app.include_router(xray_router)
 
 
 @app.get("/health")

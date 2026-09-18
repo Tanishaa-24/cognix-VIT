@@ -7,7 +7,7 @@ from typing import Optional
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from utils.cascade_utils import (
-    get_cascade_timeline, get_shap_explanation, simulate_counterfactual
+    get_cascade_timeline, get_shap_explanation, simulate_counterfactual, get_clinical_insights
 )
 
 router = APIRouter(prefix="/cascade", tags=["Cascade"])
@@ -41,8 +41,10 @@ class ClinicalData(BaseModel):
     bmi:               float
     smoking_status:    int    # 0=never, 1=formerly, 2=smokes
     # ECG results (from ECG module — injected into cascade)
-    arrhythmia_name:   str    = "NSR"
+    arrhythmia_name:       str   = "NSR"
     arrhythmia_confidence: float = 1.0
+    # X-ray results (optional — used for cross-modal danger flag)
+    xray_class:            str   = "Normal"
 
 
 class InterventionRequest(BaseModel):
@@ -125,12 +127,17 @@ async def cascade_predict(data: ClinicalData):
     else:
         action = "🟢 Low cascade risk. Continue preventive monitoring. Annual review recommended."
 
+    insights = get_clinical_insights(
+        clinical, data.arrhythmia_name, stage, combined_risk, data.xray_class
+    )
+
     return {
-        "cascade_stage":     stage,
-        "timeline":          timeline,
-        "shap_explanation":  shap_vals,
-        "cardiac_risk":      cardiac["cardiac_risk"],
+        "cascade_stage":      stage,
+        "timeline":           timeline,
+        "shap_explanation":   shap_vals,
+        "cardiac_risk":       cardiac["cardiac_risk"],
         "recommended_action": action,
+        "insights":           insights,
     }
 
 

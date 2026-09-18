@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #080d1a;
+  color: #e2e8f0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  min-height: 100vh;
+}
+
+.ecg-path { stroke-dasharray: 3000; stroke-dashoffset: 3000; animation: draw-ecg 2.5s ease forwards; }
+@keyframes draw-ecg { to { stroke-dashoffset: 0; } }
+
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.6); }
+  70% { box-shadow: 0 0 0 12px rgba(239,68,68,0); }
+  100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+}
+.pulse-critical { animation: pulse-ring 1.5s infinite; }
+
+@keyframes fade-in { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+.fade-in { animation: fade-in 0.4s ease forwards; }
+
+.shap-bar { transition: width 0.8s cubic-bezier(.4,0,.2,1); }
